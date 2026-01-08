@@ -1,86 +1,78 @@
+import { CreamRecipe, UserPreferences } from '../types';
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { UserPreferences, CreamRecipe } from "../types";
-
-// 初始化 AI 实例。
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+// ========================================
+// 安全配置
+// ========================================
+// 👇 把这里换成你刚才在 Cloudflare 部署后获得的那个 URL
+// 注意：结尾不要带 /
+const WORKER_URL = "https://creamlab20.cathwhite404.workers.dev"; 
 
 export const generateCreamRecipe = async (prefs: UserPreferences): Promise<CreamRecipe> => {
-  const ai = getAI();
-  
-  const flavorIntensityDesc = Object.entries(prefs.flavorLevels)
-    .map(([flavor, level]) => `${flavor}: ${level}%`)
+  // 1. 构建提示词 (Prompt)
+  // (这部分逻辑不变，还是由前端生成提示词)
+  const flavorDesc = Object.entries(prefs.flavorLevels)
+    .filter(([_, val]) => val > 0)
+    .map(([key, val]) => `${key}: ${val}%`)
     .join(', ');
 
-  const textPrompt = `
-    你是一位专门为初学者设计配方的烘焙博主。请根据以下极简要求设计一个极其简单的创意奶油配方：
+  const prompt = `
+    你是一位世界顶级的甜点研发大师。请根据用户提供的材料和口味偏好，设计一款极具创意的奶油配方。
     
-    用户提供的核心材料: ${prefs.ingredients}
-    多维度风味/指数要求: ${flavorIntensityDesc}
-    口感描述: ${prefs.texture}
-    
-    输出严格要求：
-    1. 步骤数量必须控制在 3-5 步。
-    2. 每一步都要简短、直接，字数控制在 30 字以内，适配手机全屏沉浸阅读。
-    3. 做法必须是“居家零难度”：仅需简单的搅拌、混合、冷藏或小火加热。无需昂贵的专业设备。
-    4. 材料清单需要有准确的家用量具单位（如克g、勺spoon、毫升ml）。
-    5. 必须紧扣用户的偏好，例如：如果创新度指数高，请给出一个出人意料的组合；如果丝滑度高，请强调过滤或搅拌技巧。
+    [用户输入]
+    - 手边材料: ${prefs.ingredients}
+    - 口味偏好: ${flavorDesc}
+    - 期望口感: ${prefs.texture}
+
+    [输出要求]
+    请严格只返回一段合法的 JSON 代码，不要包含 markdown 格式标记。
+    JSON 格式必须包含以下字段：
+    {
+      "id": "UUID",
+      "recipeName": "名称",
+      "summary": "简介",
+      "ingredients": [{"item": "材料", "amount": "用量"}],
+      "steps": ["步骤1", "步骤2"],
+      "textureTips": "秘籍",
+      "pairingSuggestions": "搭配",
+      "timestamp": ${Date.now()}
+    }
   `;
 
-  const textResponse = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: textPrompt,
-    config: {
-      systemInstruction: "你是一个极简主义烘焙助手。你的任务是把奶油制作简化为手机上几秒钟就能读完的简单步骤。避开所有专业术语，使用最通俗的词汇。即使偏好很复杂，你的方案也要保持极简可行。",
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          recipeName: { type: Type.STRING },
-          summary: { type: Type.STRING },
-          ingredients: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                item: { type: Type.STRING },
-                amount: { type: Type.STRING }
-              },
-              required: ["item", "amount"]
-            }
-          },
-          steps: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING }
-          },
-          textureTips: { type: Type.STRING },
-          pairingSuggestions: { type: Type.STRING },
-          flavorProfile: {
-            type: Type.OBJECT,
-            properties: {
-              sweetness: { type: Type.NUMBER },
-              acidity: { type: Type.NUMBER },
-              complexity: { type: Type.NUMBER },
-              creaminess: { type: Type.NUMBER },
-              innovation: { type: Type.NUMBER }
-            },
-            required: ["sweetness", "acidity", "complexity", "creaminess", "innovation"]
-          }
-        },
-        required: ["recipeName", "summary", "ingredients", "steps", "textureTips", "pairingSuggestions", "flavorProfile"]
-      }
+  try {
+    // 2. 发送请求给 Cloudflare Worker
+    // 注意：这里不再需要 API Key 了！因为 Key 在 Worker 里。
+    const response = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [{ text: prompt }]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Worker 请求失败: ${response.status}`);
     }
-  });
 
-  const recipeData = JSON.parse(textResponse.text || "{}");
+    const data = await response.json();
 
-  // 根据用户要求，不再生成实物图片，使用空字符串作为标识，UI 将显示默认图标。
-  const imageUrl = "";
+    // 3. 解析结果 (跟以前一样)
+    let textResponse = data.contents?.[0]?.parts?.[0]?.text || 
+                       data.candidates?.[0]?.content?.parts?.[0]?.text;
 
-  return {
-    ...recipeData,
-    id: Math.random().toString(36).substr(2, 9),
-    timestamp: Date.now(),
-    imageUrl
-  } as CreamRecipe;
+    if (!textResponse) {
+      throw new Error("API 返回了空内容");
+    }
+
+    textResponse = textResponse.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(textResponse);
+
+  } catch (error) {
+    console.error("生成配方出错:", error);
+    throw error;
+  }
 };
