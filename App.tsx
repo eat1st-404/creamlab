@@ -3,6 +3,8 @@ import { generateCreamRecipe } from './services/geminiService';
 import { FlavorPreference, UserPreferences, CreamRecipe } from './types';
 import { RecipeCard } from './components/RecipeCard';
 import { BakingMode } from './components/BakingMode';
+// 🔥【新增】引入数据埋点工具
+import posthog from 'posthog-js';
 
 const App: React.FC = () => {
   const [formData, setFormData] = useState<UserPreferences>({
@@ -40,40 +42,40 @@ const App: React.FC = () => {
     const alreadyExists = savedRecipes.some(r => r.id === recipe.id);
     if (alreadyExists) return;
     
+    // 🔥【新增】埋点：记录用户保存配方的行为
+    posthog.capture('recipe_saved', {
+      recipe_name: recipe.recipeName,
+      ingredients: recipe.ingredients.map(i => i.item).join(', '),
+    });
+
     setSavedRecipes(prev => {
-      const updated = [recipe, ...prev];
+      // 确保保存时有正确的时间戳
+      const recipeToSave = { ...recipe, timestamp: recipe.timestamp || Date.now() };
+      const updated = [recipeToSave, ...prev];
       localStorage.setItem('cream_crafter_collection', JSON.stringify(updated));
       return updated;
     });
   };
 
-  // --- 🔥 核心修复区域：handleDelete ---
   const handleDelete = (id: string, e?: React.MouseEvent | React.TouchEvent) => {
-    // 1. 阻止事件冒泡
     if (e) {
       e.stopPropagation();
     }
 
-    // 2. 确认弹窗
     if (!window.confirm("确定要删除这份配方吗？删除后无法找回哦。")) return;
     
-    // 3. 关键判断：我们现在是否正在看这张要删除的卡片？
-    // 如果是，删完之后必须把屏幕清空，否则卡片会卡在界面上
     const isDeletingCurrentView = currentRecipe?.id === id;
 
-    // 4. 更新数据源
     setSavedRecipes(prev => {
       const updated = prev.filter(r => r.id !== id);
       localStorage.setItem('cream_crafter_collection', JSON.stringify(updated));
       return updated;
     });
     
-    // 5. 强制刷新 UI
     if (isDeletingCurrentView) {
-      setCurrentRecipe(null); // 这行代码会让当前卡片消失，回到输入界面
+      setCurrentRecipe(null);
     }
   };
-  // ------------------------------------
 
   const handleFlavorChange = (flavor: string, value: number) => {
     setFormData(prev => ({
@@ -92,6 +94,12 @@ const App: React.FC = () => {
     setError(null);
     try {
       const submitData = { ...formData, texture: formData.texture.trim() || "顺滑细腻" };
+      
+      // 🔥【新增】埋点：记录用户生成配方的请求
+      posthog.capture('recipe_generated_start', {
+         ingredients: submitData.ingredients
+      });
+
       const result = await generateCreamRecipe(submitData);
       setCurrentRecipe(result);
       setView('create');
@@ -174,11 +182,15 @@ const App: React.FC = () => {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="font-bold text-gray-800 truncate">{recipe.recipeName}</h3>
+                      {/* 🔥【修复】使用更友好的中文日期格式 */}
                       <p className="text-[10px] text-gray-400 uppercase tracking-widest mt-1">
-                        {new Date(recipe.timestamp).toLocaleDateString()}
+                        {recipe.timestamp ? new Date(recipe.timestamp).toLocaleDateString('zh-CN', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        }) : '刚刚'}
                       </p>
                     </div>
-                    {/* 列表里的删除按钮 */}
                     <button 
                       onClick={(e) => handleDelete(recipe.id, e)}
                       className="relative z-10 w-10 h-10 flex items-center justify-center rounded-full text-gray-300 hover:text-red-500 hover:bg-red-50 transition-all active:scale-90"
