@@ -3,7 +3,7 @@ import { generateCreamRecipe } from './services/geminiService';
 import { FlavorPreference, UserPreferences, CreamRecipe } from './types';
 import { RecipeCard } from './components/RecipeCard';
 import { BakingMode } from './components/BakingMode';
-// 🔥【新增】引入数据埋点工具
+// ✅ 确保引入 PostHog，不然没法看数据
 import posthog from 'posthog-js';
 
 const App: React.FC = () => {
@@ -26,7 +26,6 @@ const App: React.FC = () => {
   const [isBakingMode, setIsBakingMode] = useState(false);
   const [view, setView] = useState<'create' | 'archives'>('create');
 
-  // Load saved recipes from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem('cream_crafter_collection');
     if (saved) {
@@ -42,14 +41,13 @@ const App: React.FC = () => {
     const alreadyExists = savedRecipes.some(r => r.id === recipe.id);
     if (alreadyExists) return;
     
-    // 🔥【新增】埋点：记录用户保存配方的行为
+    // ✅ 埋点：保存配方
     posthog.capture('recipe_saved', {
       recipe_name: recipe.recipeName,
       ingredients: recipe.ingredients.map(i => i.item).join(', '),
     });
 
     setSavedRecipes(prev => {
-      // 确保保存时有正确的时间戳
       const recipeToSave = { ...recipe, timestamp: recipe.timestamp || Date.now() };
       const updated = [recipeToSave, ...prev];
       localStorage.setItem('cream_crafter_collection', JSON.stringify(updated));
@@ -58,10 +56,7 @@ const App: React.FC = () => {
   };
 
   const handleDelete = (id: string, e?: React.MouseEvent | React.TouchEvent) => {
-    if (e) {
-      e.stopPropagation();
-    }
-
+    if (e) { e.stopPropagation(); }
     if (!window.confirm("确定要删除这份配方吗？删除后无法找回哦。")) return;
     
     const isDeletingCurrentView = currentRecipe?.id === id;
@@ -95,7 +90,7 @@ const App: React.FC = () => {
     try {
       const submitData = { ...formData, texture: formData.texture.trim() || "顺滑细腻" };
       
-      // 🔥【新增】埋点：记录用户生成配方的请求
+      // ✅ 埋点：开始生成
       posthog.capture('recipe_generated_start', {
          ingredients: submitData.ingredients
       });
@@ -126,7 +121,6 @@ const App: React.FC = () => {
         <BakingMode recipe={currentRecipe} onExit={() => setIsBakingMode(false)} />
       )}
 
-      {/* 顶部标题栏 */}
       <nav className="sticky top-0 z-20 bg-white/70 backdrop-blur-xl px-6 py-4 flex justify-between items-center border-b border-orange-50/50">
         <h1 
           className="text-xl font-black tracking-tight text-gray-900 cursor-pointer"
@@ -180,16 +174,9 @@ const App: React.FC = () => {
                     <div className="w-16 h-16 rounded-2xl bg-orange-50 overflow-hidden flex-shrink-0">
                       <div className="w-full h-full flex items-center justify-center text-xl">🍦</div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-gray-800 truncate">{recipe.recipeName}</h3>
-                      {/* 🔥【修复】使用更友好的中文日期格式 */}
-                      <p className="text-[10px] text-gray-400 uppercase tracking-widest mt-1">
-                        {recipe.timestamp ? new Date(recipe.timestamp).toLocaleDateString('zh-CN', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric'
-                        }) : '刚刚'}
-                      </p>
+                    {/* 👇 这里移除了日期显示，只保留名字 */}
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                      <h3 className="font-bold text-gray-800 truncate text-base">{recipe.recipeName}</h3>
                     </div>
                     <button 
                       onClick={(e) => handleDelete(recipe.id, e)}
