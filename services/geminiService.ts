@@ -1,24 +1,26 @@
 import { CreamRecipe, UserPreferences } from '../types';
 
 // ========================================
-// 安全配置
+// 环境变量配置 (DMXAPI 直连模式)
 // ========================================
-// 👇 把这里换成你刚才在 Cloudflare 部署后获得的那个 URL
-// 注意：结尾不要带 /
-// ✅ 改成这样 (必须用 import.meta.env 读取)
+
+// 1. 从环境变量中读取 Key
 const API_KEY = import.meta.env.VITE_API_KEY;
 
-// 建议加一个检查，防止没填 Key 导致报错难查
+// 安全检查：防止 Key 没填导致请求失败
 if (!API_KEY) {
-  console.error("❌ 错误：未找到 API Key，请检查环境变量配置");
-  throw new Error("请在设置中配置 VITE_API_KEY");
+  console.error("❌ 错误：未找到 API Key。");
+  console.error("请确保在 .env 文件(本地) 或 Cloudflare Pages 环境变量(线上) 中配置了 VITE_API_KEY");
+  // 为了不让应用直接崩掉，这里可以不抛出 Error，但在控制台报警
 }
 
 const MODEL = "gemini-2.5-flash";
 
+// 2. 关键修改：利用 Key 拼接出 DMXAPI 的请求地址
+const API_URL = `https://www.dmxapi.cn/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
+
 export const generateCreamRecipe = async (prefs: UserPreferences): Promise<CreamRecipe> => {
-  // 1. 构建提示词 (Prompt)
-  // (这部分逻辑不变，还是由前端生成提示词)
+  // 构建提示词 (Prompt) - 保持不变
   const flavorDesc = Object.entries(prefs.flavorLevels)
     .filter(([_, val]) => val > 0)
     .map(([key, val]) => `${key}: ${val}%`)
@@ -48,9 +50,9 @@ export const generateCreamRecipe = async (prefs: UserPreferences): Promise<Cream
   `;
 
   try {
-    // 2. 发送请求给 Cloudflare Worker
-    // 注意：这里不再需要 API Key 了！因为 Key 在 Worker 里。
-    const response = await fetch(WORKER_URL, {
+    // 3. 发送请求
+    // ✅ 修正点：这里改成 fetch(API_URL)，而不是未定义的 WORKER_URL
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -64,12 +66,12 @@ export const generateCreamRecipe = async (prefs: UserPreferences): Promise<Cream
     });
 
     if (!response.ok) {
-      throw new Error(`Worker 请求失败: ${response.status}`);
+      throw new Error(`API 请求失败: ${response.status}`);
     }
 
     const data = await response.json();
 
-    // 3. 解析结果 (跟以前一样)
+    // 解析结果
     let textResponse = data.contents?.[0]?.parts?.[0]?.text || 
                        data.candidates?.[0]?.content?.parts?.[0]?.text;
 
