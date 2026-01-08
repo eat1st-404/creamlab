@@ -5,7 +5,16 @@ import { CreamRecipe, UserPreferences } from '../types';
 // ========================================
 // 👇 把这里换成你刚才在 Cloudflare 部署后获得的那个 URL
 // 注意：结尾不要带 /
-const WORKER_URL = "https://creamlab20.cathwhite404.workers.dev"; 
+// ✅ 改成这样 (必须用 import.meta.env 读取)
+const API_KEY = import.meta.env.VITE_API_KEY;
+
+// 建议加一个检查，防止没填 Key 导致报错难查
+if (!API_KEY) {
+  console.error("❌ 错误：未找到 API Key，请检查环境变量配置");
+  throw new Error("请在设置中配置 VITE_API_KEY");
+}
+
+const MODEL = "gemini-2.5-flash";
 
 export const generateCreamRecipe = async (prefs: UserPreferences): Promise<CreamRecipe> => {
   // 1. 构建提示词 (Prompt)
